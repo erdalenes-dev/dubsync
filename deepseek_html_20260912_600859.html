@@ -1,0 +1,2104 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DubSync Studio - Ortak Video Seslendirme ve Dublaj</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PeerJS WebRTC -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              500: '#8b5cf6',
+              600: '#7c3aed',
+              700: '#6d28d9'
+            },
+            studio: {
+              900: '#0b0f19',
+              850: '#111827',
+              800: '#1f2937',
+              700: '#374151'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b0f19; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+    .pulse-record {
+      animation: pulse-red 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .7; transform: scale(1.08); }
+    }
+    .touch-target { min-height: 44px; }
+  </style>
+</head>
+<body class="bg-studio-900 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-600 selection:text-white pb-12">
+
+  <!-- ================= FILE:// UYARI BANNER'I ================= -->
+  <div id="fileProtocolWarning" class="hidden bg-amber-500/15 border-b border-amber-500/40 text-amber-300 text-xs px-4 py-2 text-center">
+    ⚠️ Bu sayfayı doğrudan dosya olarak (file://) açtınız. YouTube oynatıcısı ve mikrofon/oda özellikleri tarayıcı güvenlik kısıtlamaları yüzünden çalışmayabilir.
+    Lütfen bir yerel sunucudan açın (örn: <code class="bg-black/30 px-1 rounded">npx serve</code> veya VSCode "Live Server" eklentisi ile <code class="bg-black/30 px-1 rounded">http://localhost</code> üzerinden).
+  </div>
+
+  <!-- ================= TOP NAVIGATION ================= -->
+  <header class="bg-studio-850 border-b border-slate-800 sticky top-0 z-50 backdrop-blur-md bg-opacity-90">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+      <!-- Logo & Title -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-violet-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight flex items-center gap-2">
+            DubSync Studio
+            <span class="text-[10px] bg-violet-500/20 text-violet-300 font-medium px-2 py-0.5 rounded-full border border-violet-500/30">P2P v1.1</span>
+          </h1>
+          <p class="text-xs text-slate-400 hidden sm:block">Ortak Video Seslendirme & Dublaj Odası</p>
+        </div>
+      </div>
+
+      <!-- Room & Status Indicator -->
+      <div class="flex items-center gap-2">
+        <div id="connectionPill" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" id="statusDot"></span>
+          <span id="statusText">Oda Bekleniyor</span>
+        </div>
+
+        <button id="btnShareRoom" class="hidden items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-xs font-semibold text-white shadow transition-all active:scale-95">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+          </svg>
+          <span class="hidden sm:inline">Linki Paylaş</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTAINER ================= -->
+  <main class="max-w-7xl mx-auto px-3 sm:px-4 py-4 w-full flex-1 flex flex-col gap-4">
+
+    <!-- ROOM ENTRY & USER MODAL / BANNER (Eğer odaya bağlanmadıysa) -->
+    <div id="roomEntryCard" class="bg-studio-850 rounded-2xl border border-violet-900/40 p-5 shadow-2xl relative overflow-hidden">
+      <div class="absolute -right-10 -top-10 w-48 h-48 bg-violet-600/10 rounded-full blur-3xl pointer-events-none"></div>
+      
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            🎙️ Seslendirme Odası Kur veya Katıl
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">
+            Arkadaşınla farklı yerlerden aynı videoyu izleyip seslendirme yapın. Sunucu gerekmez, doğrudan tarayıcıdan bağlanırsınız.
+          </p>
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+          <input type="text" id="userNameInput" placeholder="Adınız (Örn: Can)" class="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm focus:outline-none focus:border-violet-500 text-white placeholder-slate-500">
+          
+          <button id="btnCreateRoom" class="px-4 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 font-semibold text-xs sm:text-sm text-white shadow-lg shadow-violet-500/25 transition active:scale-95 whitespace-nowrap">
+            Yeni Oda Kur
+          </button>
+          
+          <div class="flex items-center gap-1.5">
+            <input type="text" id="roomCodeInput" placeholder="Oda Kodu" class="w-28 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm uppercase tracking-wider text-center focus:outline-none focus:border-violet-500 text-white placeholder-slate-500">
+            <button id="btnJoinRoom" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs sm:text-sm font-semibold text-slate-200 transition active:scale-95 whitespace-nowrap">
+              Katıl
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRESENCE BAR: Odadaki Katılımcılar ve Canlı Durumları -->
+    <div id="presenceBar" class="bg-studio-850 rounded-xl border border-slate-800 px-4 py-2.5 flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-2 text-xs text-slate-400 font-medium">
+        <span>👥 Odadakiler:</span>
+        <div id="usersList" class="flex items-center gap-2 flex-wrap">
+          <!-- Dinamik Katılımcı Kartları -->
+          <div class="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700 text-xs">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="font-semibold text-slate-200" id="localUserBadge">Siz</span>
+            <span class="text-[10px] text-slate-400">(Bekliyor)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-xs text-slate-400 flex items-center gap-2">
+        <span>Oda Kodu: <strong id="displayRoomCode" class="text-violet-400 select-all cursor-pointer font-mono">---</strong></span>
+      </div>
+    </div>
+
+    <!-- ================= 2-COLUMN STUDIO LAYOUT ================= -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+
+      <!-- LEFT COLUMN: VIDEO PLAYER & RECORDING CONSOLE (Lg: 7 cols) -->
+      <div class="lg:col-span-7 flex flex-col gap-4">
+        
+        <!-- Video Source Loader Card -->
+        <div class="bg-studio-850 rounded-2xl border border-slate-800 p-3.5 flex flex-col gap-3">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+              </svg>
+              Video Kaynağı
+            </span>
+            <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+              <button id="tabYoutube" class="px-2.5 py-1 rounded-md text-xs font-semibold bg-violet-600 text-white transition">YouTube Linki</button>
+              <button id="tabLocal" class="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition">Video Dosyası (MP4)</button>
+            </div>
+          </div>
+
+          <!-- YouTube Input Box -->
+          <div id="youtubeInputContainer" class="flex flex-col gap-2">
+            <div class="flex gap-2">
+              <input type="text" id="ytUrlInput" placeholder="YouTube Video Linki (Örn: https://www.youtube.com/watch?v=...)" class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs sm:text-sm focus:outline-none focus:border-violet-500 text-white placeholder-slate-500">
+              <button id="btnLoadYt" class="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold whitespace-nowrap transition active:scale-95">
+                Yükle & Senkronize Et
+              </button>
+            </div>
+            <p id="ytErrorNotice" class="hidden text-[11px] text-red-400 bg-red-950/30 border border-red-800/40 rounded-lg px-3 py-2"></p>
+          </div>
+
+          <!-- Local File Input Box -->
+          <div id="localInputContainer" class="hidden flex-col gap-2.5">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <label class="cursor-pointer px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 whitespace-nowrap shadow active:scale-95">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                <span>Bilgisayardan / Telefondan Video Seç</span>
+                <input type="file" id="localVideoFileInput" accept="video/mp4,video/webm,video/quicktime,video/mkv,.mkv,.mp4,.webm" class="sr-only">
+              </label>
+
+              <!-- Live P2P Stream Button -->
+              <button id="btnStreamLocalVideo" class="hidden px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition items-center justify-center gap-1.5 whitespace-nowrap shadow active:scale-95">
+                <span class="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
+                <span>📡 Canlı Yayınla (Arkadaşına Aktar)</span>
+              </button>
+
+              <span id="loadedVideoFileName" class="text-[11px] text-violet-300 font-mono truncate max-w-[220px] self-center"></span>
+            </div>
+
+            <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400 flex items-start gap-2">
+              <span class="text-violet-400 text-sm">💡</span>
+              <div>
+                <strong>Yerel Video Seçenekleri:</strong> Videoyu aşağıdaki alana <strong>sürükleyip bırakabilirsiniz</strong>.
+                Arkadaşınız da aynı videoyu seçip sıfır gecikmeli izleyebilir VEYA <strong>"Canlı Yayınla"</strong> butonuna basarak videonuzu doğrudan arkadaşınızın ekranına canlı WebRTC yayını olarak aktarabilirsiniz!
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Video Player Display Container -->
+        <div id="videoPlayerContainer" class="bg-black rounded-2xl border border-slate-800 overflow-hidden relative shadow-2xl aspect-video flex items-center justify-center group transition-all">
+          <!-- Placeholder when no video -->
+          <div id="videoPlaceholder" class="flex flex-col items-center justify-center p-6 text-center text-slate-500 pointer-events-none">
+            <svg class="w-14 h-14 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <p class="text-xs sm:text-sm font-medium">YouTube linki girin veya bilgisayarınızdan videoyu buraya sürükleyip bırakın</p>
+          </div>
+
+          <!-- YouTube Iframe Container -->
+          <div id="ytPlayerWrapper" class="w-full h-full hidden">
+            <div id="ytPlayer"></div>
+          </div>
+
+          <!-- Native Video Element -->
+          <video id="nativeVideoPlayer" class="w-full h-full object-contain hidden" playsinline></video>
+
+          <!-- Dublajlı İzleme Modu Rozeti -->
+          <div id="dubbingModeBadge" class="hidden absolute top-3 left-3 z-20 bg-fuchsia-600/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 animate-pulse">
+            🎭 Dublajlı İzleniyor — Video sesi kısık
+          </div>
+
+          <!-- 3-2-1 Geri Sayım Overlay -->
+          <div id="countdownOverlay" class="absolute inset-0 bg-black/85 backdrop-blur-sm z-30 flex flex-col items-center justify-center hidden">
+            <span class="text-xs font-bold text-violet-400 uppercase tracking-widest mb-1">Kayda Başlanıyor</span>
+            <div id="countdownNumber" class="text-7xl sm:text-9xl font-black text-white scale-125 transition-all">3</div>
+            <p class="text-xs text-slate-400 mt-3 font-mono">Mikrofonunuz hazır olsun!</p>
+          </div>
+
+          <!-- Video Zaman Çubuğu ve Kontrolleri -->
+          <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2.5 sm:p-3 flex items-center justify-between text-xs text-white flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <button id="btnPlayPauseSync" class="w-8 h-8 rounded-lg bg-violet-600 hover:bg-violet-500 flex items-center justify-center transition active:scale-95 shadow">
+                <svg id="playIcon" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <svg id="pauseIcon" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              </button>
+              
+              <!-- Skip 5s -->
+              <button id="btnSkipBack" class="px-1.5 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-[10px] font-mono text-slate-300 transition" title="5 saniye geri">-5s</button>
+              <button id="btnSkipForward" class="px-1.5 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-[10px] font-mono text-slate-300 transition" title="5 saniye ileri">+5s</button>
+
+              <span id="timeDisplay" class="font-mono text-slate-300 text-[11px] sm:text-xs">00:00.0 / 00:00.0</span>
+            </div>
+
+            <!-- Video Sesi (Ducking), Hız ve Segment İşaretleme -->
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <!-- Video Volume Slider (Dublaj yaparken video sesini kısmak için) -->
+              <div class="flex items-center gap-1 bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-700 text-[11px]" title="Video Sesi (Dublaj esnasında kısabilirsiniz)">
+                <button id="btnToggleMute" class="text-slate-400 hover:text-white text-xs">🔊</button>
+                <input type="range" id="videoVolumeSlider" min="0" max="1" step="0.05" value="0.8" class="w-12 sm:w-16 accent-violet-500 h-1 cursor-pointer">
+              </div>
+
+              <!-- Speed Rate -->
+              <select id="videoSpeedSelect" class="bg-slate-900 border border-slate-700 text-[10px] rounded px-1 py-1 text-slate-300 focus:outline-none cursor-pointer">
+                <option value="0.75">0.75x</option>
+                <option value="1.0" selected>1.0x</option>
+                <option value="1.25">1.25x</option>
+              </select>
+
+              <button id="btnSetInPoint" class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-[11px] font-semibold transition" title="Mevcut süreyi segment başı yap">
+                [ Başlangıç
+              </button>
+              <button id="btnSetOutPoint" class="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-[11px] font-semibold transition" title="Mevcut süreyi segment sonu yap">
+                Bitiş ]
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= RECORDING DECK & PERSONAL APPROVAL ================= -->
+        <div id="recordingStudioDeck" class="bg-studio-850 rounded-2xl border border-slate-800 p-4 flex flex-col gap-3 shadow-xl">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-violet-500"></span>
+              <h3 class="text-sm font-bold text-white">Seslendirme Masası</h3>
+            </div>
+            <div id="activeSegmentBadge" class="text-xs bg-slate-800 px-2.5 py-1 rounded-lg text-violet-300 border border-slate-700">
+              Seçili Parça: <span class="font-semibold text-white" id="currentSelectedSegmentName">Henüz seçilmedi</span>
+            </div>
+          </div>
+
+          <!-- Mikrofon Dalga Formu / Visualizer Canvas -->
+          <div class="relative bg-slate-900 rounded-xl h-20 border border-slate-800 flex items-center justify-center overflow-hidden">
+            <canvas id="visualizerCanvas" class="w-full h-full"></canvas>
+            <div id="micIdleNotice" class="absolute text-xs text-slate-500 font-medium">
+              Segment seçip "Kayda Başla" butonuna basın
+            </div>
+          </div>
+
+          <!-- Kayıt Kontrol Aksiyonları -->
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div class="flex items-center gap-2 w-full sm:w-auto">
+              <!-- Kayda Başla / Durdur Butonu -->
+              <button id="btnStartRecording" class="flex-1 sm:flex-none touch-target px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 font-bold text-xs sm:text-sm text-white shadow-lg shadow-red-600/30 transition active:scale-95 flex items-center justify-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-white animate-pulse"></span>
+                <span>Bu Parçayı Kaydet</span>
+              </button>
+
+              <button id="btnStopRecording" class="hidden flex-1 sm:flex-none touch-target px-5 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold text-xs sm:text-sm text-white transition active:scale-95 flex items-center justify-center gap-2">
+                <span class="w-3 h-3 rounded bg-red-400"></span>
+                <span>Kaydı Bitir</span>
+              </button>
+            </div>
+
+            <!-- Kayıt Süresi Sayacı -->
+            <div id="recordingTimerBadge" class="hidden items-center gap-2 text-red-400 font-mono text-sm font-bold">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500 pulse-record"></span>
+              <span id="recordingTimer">00:00</span>
+            </div>
+          </div>
+
+          <!-- ================= KİŞİSEL ONAMA VE ÖNİZLEME ALANI ================= -->
+          <div id="personalReviewSection" class="hidden mt-2 p-3.5 rounded-xl bg-violet-950/30 border border-violet-800/40 flex flex-col gap-3">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-violet-300 flex items-center gap-1.5">
+                🎧 Kendi Kaydınızı Dinleyin & Onaylayın
+              </span>
+              <span class="text-slate-400 text-[11px]">Henüz arkadaşınıza gitmedi</span>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <audio id="reviewAudioPlayer" controls class="w-full h-9 rounded-lg"></audio>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <button id="btnDiscardRecording" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition active:scale-95">
+                🗑️ Sil & Tekrar Kaydet
+              </button>
+              <button id="btnApproveAndShare" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/20 transition active:scale-95 flex items-center gap-1.5">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                Beğendim, Odaya Gönder
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: SEGMENTLER, GÖREV ATAMA & MASTER EXPORT (Lg: 5 cols) -->
+      <div class="lg:col-span-5 flex flex-col gap-4">
+
+        <!-- Yeni Segment Ekleme Paneli -->
+        <div class="bg-studio-850 rounded-2xl border border-slate-800 p-4 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+              ✂️ Videoyu Parçala / Yeni Sahne Ekle
+            </h3>
+          </div>
+
+          <div class="grid grid-cols-1 gap-2.5">
+            <input type="text" id="segmentTitleInput" placeholder="Sahne Adı (Örn: Sahne 1 - Karakter Konuşması)" class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs focus:outline-none focus:border-violet-500 text-white placeholder-slate-500">
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-1">Başlangıç (sn)</label>
+                <input type="number" step="0.1" id="segmentStartInput" placeholder="0.0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono focus:outline-none focus:border-violet-500 text-white">
+              </div>
+              <div>
+                <label class="block text-[10px] text-slate-400 mb-1">Bitiş (sn) <span class="text-slate-500">— video yüklenince otomatik son saniyeye ayarlanır</span></label>
+                <input type="number" step="0.1" id="segmentEndInput" placeholder="15.0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono focus:outline-none focus:border-violet-500 text-white">
+              </div>
+            </div>
+
+            <!-- KİM KAYDEDECEK? (GÖREV ATAMA) -->
+            <div>
+              <label class="block text-[10px] text-slate-400 mb-1">Bu Parçayı Kim Kaydedecek?</label>
+              <div class="grid grid-cols-3 gap-1.5">
+                <label class="cursor-pointer">
+                  <input type="radio" name="assignedTo" value="me" checked class="peer sr-only">
+                  <div class="text-center py-1.5 px-2 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-semibold text-slate-400 peer-checked:bg-violet-600 peer-checked:text-white peer-checked:border-violet-500 transition">
+                    👤 Ben
+                  </div>
+                </label>
+                <label class="cursor-pointer">
+                  <input type="radio" name="assignedTo" value="friend" class="peer sr-only">
+                  <div class="text-center py-1.5 px-2 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-semibold text-slate-400 peer-checked:bg-violet-600 peer-checked:text-white peer-checked:border-violet-500 transition">
+                    👥 Arkadaşım
+                  </div>
+                </label>
+                <label class="cursor-pointer">
+                  <input type="radio" name="assignedTo" value="both" class="peer sr-only">
+                  <div class="text-center py-1.5 px-2 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-semibold text-slate-400 peer-checked:bg-violet-600 peer-checked:text-white peer-checked:border-violet-500 transition">
+                    🎭 İkimiz De
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <button id="btnAddSegment" class="mt-1 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 transition active:scale-95 flex items-center justify-center gap-1.5">
+              <span>+ Bu Parçayı Sahnelere Ekle</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Parçalanan Sahneler Listesi (Timeline) -->
+        <div class="bg-studio-850 rounded-2xl border border-slate-800 p-4 flex flex-col gap-3 flex-1">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+              📑 Parçalanan Segmentler
+              <span id="segmentCountBadge" class="text-[10px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-400 border border-slate-700">0 Parça</span>
+            </h3>
+          </div>
+
+          <div id="segmentsListContainer" class="flex flex-col gap-2.5 overflow-y-auto max-h-[360px] pr-1">
+            <!-- Boş durum -->
+            <div id="noSegmentsNotice" class="text-center py-8 text-xs text-slate-500">
+              Henüz bir sahne parçalanmadı.<br>Yukarıdan başlangıç/bitiş seçip ekleyin.
+            </div>
+          </div>
+
+          <!-- ================= MASTER EXPORT & BİRLEŞTİRME ================= -->
+          <div class="mt-auto pt-3 border-t border-slate-800 flex flex-col gap-2">
+            <button id="btnMergeAllAudio" class="touch-target w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:opacity-95 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-600/20 transition active:scale-95 flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              <span>Tüm Parçaları Birleştir ve İndir (.WAV)</span>
+            </button>
+            <p class="text-[10px] text-slate-500 text-center">
+              Web Audio API ile tüm onaylanan sesler videonun orijinal zamanlarına göre otomatik dizilir ve tek bir dosya yapılır. Video sesi dahil değildir — bu sadece dublaj seslerinin karışımıdır.
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ================= INLINE SCRIPT: LOGIC, WEBRTC, AUDIO MIXER ================= -->
+  <script>
+    // file:// protokolü uyarısı — YouTube API ve bazı özellikler bu protokolde bozulur
+    if (window.location.protocol === 'file:') {
+      document.getElementById('fileProtocolWarning').classList.remove('hidden');
+    }
+
+    // ================= GLOBAL APPLICATION STATE =================
+    const AppState = {
+      user: {
+        id: 'user_' + Math.random().toString(36).substring(2, 9),
+        name: localStorage.getItem('dub_username') || 'Seslendirmen_' + Math.floor(Math.random() * 900 + 100),
+        status: 'idle' // 'idle' | 'recording' | 'reviewing' | 'ready'
+      },
+      room: {
+        id: null,
+        isHost: false,
+        connectedPeers: new Map() // peerId -> { name, status }
+      },
+      video: {
+        type: null, // 'youtube' | 'local'
+        ytId: null,
+        localUrl: null,
+        duration: 0,
+        currentTime: 0,
+        isPlaying: false
+      },
+      segments: [], // [{ id, title, start, end, assignedTo, recordedBy, audioBlob, audioUrl, status }]
+      activeSegmentId: null,
+      recording: {
+        isRecording: false,
+        mediaRecorder: null,
+        audioChunks: [],
+        timerInterval: null,
+        secondsElapsed: 0,
+        tempAudioBlob: null,
+        tempAudioUrl: null
+      }
+    };
+
+    // PeerJS Instance
+    let peer = null;
+
+    // DOM Elements Cache
+    const DOM = {
+      userNameInput: document.getElementById('userNameInput'),
+      roomCodeInput: document.getElementById('roomCodeInput'),
+      btnCreateRoom: document.getElementById('btnCreateRoom'),
+      btnJoinRoom: document.getElementById('btnJoinRoom'),
+      btnShareRoom: document.getElementById('btnShareRoom'),
+      displayRoomCode: document.getElementById('displayRoomCode'),
+      statusDot: document.getElementById('statusDot'),
+      statusText: document.getElementById('statusText'),
+      usersList: document.getElementById('usersList'),
+      localUserBadge: document.getElementById('localUserBadge'),
+      
+      // Video
+      tabYoutube: document.getElementById('tabYoutube'),
+      tabLocal: document.getElementById('tabLocal'),
+      youtubeInputContainer: document.getElementById('youtubeInputContainer'),
+      localInputContainer: document.getElementById('localInputContainer'),
+      ytUrlInput: document.getElementById('ytUrlInput'),
+      btnLoadYt: document.getElementById('btnLoadYt'),
+      ytErrorNotice: document.getElementById('ytErrorNotice'),
+      localVideoFileInput: document.getElementById('localVideoFileInput'),
+      btnStreamLocalVideo: document.getElementById('btnStreamLocalVideo'),
+      loadedVideoFileName: document.getElementById('loadedVideoFileName'),
+      videoPlayerContainer: document.getElementById('videoPlayerContainer'),
+      videoPlaceholder: document.getElementById('videoPlaceholder'),
+      ytPlayerWrapper: document.getElementById('ytPlayerWrapper'),
+      nativeVideoPlayer: document.getElementById('nativeVideoPlayer'),
+      dubbingModeBadge: document.getElementById('dubbingModeBadge'),
+      btnPlayPauseSync: document.getElementById('btnPlayPauseSync'),
+      btnSkipBack: document.getElementById('btnSkipBack'),
+      btnSkipForward: document.getElementById('btnSkipForward'),
+      btnToggleMute: document.getElementById('btnToggleMute'),
+      videoVolumeSlider: document.getElementById('videoVolumeSlider'),
+      videoSpeedSelect: document.getElementById('videoSpeedSelect'),
+      playIcon: document.getElementById('playIcon'),
+      pauseIcon: document.getElementById('pauseIcon'),
+      timeDisplay: document.getElementById('timeDisplay'),
+      btnSetInPoint: document.getElementById('btnSetInPoint'),
+      btnSetOutPoint: document.getElementById('btnSetOutPoint'),
+
+      // Segments
+      segmentTitleInput: document.getElementById('segmentTitleInput'),
+      segmentStartInput: document.getElementById('segmentStartInput'),
+      segmentEndInput: document.getElementById('segmentEndInput'),
+      btnAddSegment: document.getElementById('btnAddSegment'),
+      segmentsListContainer: document.getElementById('segmentsListContainer'),
+      noSegmentsNotice: document.getElementById('noSegmentsNotice'),
+      segmentCountBadge: document.getElementById('segmentCountBadge'),
+      currentSelectedSegmentName: document.getElementById('currentSelectedSegmentName'),
+
+      // Recording
+      btnStartRecording: document.getElementById('btnStartRecording'),
+      btnStopRecording: document.getElementById('btnStopRecording'),
+      recordingTimerBadge: document.getElementById('recordingTimerBadge'),
+      recordingTimer: document.getElementById('recordingTimer'),
+      countdownOverlay: document.getElementById('countdownOverlay'),
+      countdownNumber: document.getElementById('countdownNumber'),
+      visualizerCanvas: document.getElementById('visualizerCanvas'),
+      micIdleNotice: document.getElementById('micIdleNotice'),
+
+      // Review
+      personalReviewSection: document.getElementById('personalReviewSection'),
+      reviewAudioPlayer: document.getElementById('reviewAudioPlayer'),
+      btnDiscardRecording: document.getElementById('btnDiscardRecording'),
+      btnApproveAndShare: document.getElementById('btnApproveAndShare'),
+
+      // Master Merge
+      btnMergeAllAudio: document.getElementById('btnMergeAllAudio')
+    };
+
+    // Set initial username in input
+    DOM.userNameInput.value = AppState.user.name;
+    DOM.localUserBadge.textContent = AppState.user.name;
+
+    DOM.userNameInput.addEventListener('change', (e) => {
+      const val = e.target.value.trim();
+      if (val) {
+        AppState.user.name = val;
+        localStorage.setItem('dub_username', val);
+        DOM.localUserBadge.textContent = val;
+        broadcastStatus();
+      }
+    });
+
+    // ================= PEERJS & WEBRTC P2P ROOM NETWORKING =================
+    function initPeer(customRoomId = null) {
+      if (peer) {
+        peer.destroy();
+      }
+
+      // Generate clean room ID or use given
+      const myId = customRoomId || 'dub_' + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      DOM.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+      DOM.statusText.textContent = 'Bağlanıyor...';
+
+      peer = new Peer(myId, {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      });
+
+      peer.on('open', (id) => {
+        AppState.room.id = id;
+        DOM.displayRoomCode.textContent = id;
+        DOM.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+        DOM.statusText.textContent = 'Oda Aktif: ' + id;
+        DOM.btnShareRoom.classList.remove('hidden');
+        DOM.btnShareRoom.classList.add('flex');
+
+        // URL query parameter update
+        const url = new URL(window.location);
+        url.searchParams.set('room', id);
+        window.history.replaceState({}, '', url);
+
+        updatePresenceUI();
+      });
+
+      peer.on('connection', (conn) => {
+        setupConnectionHandlers(conn);
+      });
+
+      peer.on('call', (call) => {
+        handleIncomingCall(call);
+      });
+
+      peer.on('error', (err) => {
+        console.warn('PeerJS Bilgilendirme/Hata:', err);
+        if (err.type === 'unavailable-id') {
+          // If joining an existing room, connect as a client
+          connectToHost(customRoomId);
+        } else {
+          DOM.statusText.textContent = 'Bağlantı Uyarısı: ' + err.type;
+        }
+      });
+    }
+
+    function connectToHost(hostRoomId) {
+      const clientPeerId = 'guest_' + Math.random().toString(36).substring(2, 8);
+      peer = new Peer(clientPeerId, {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      });
+
+      peer.on('open', () => {
+        DOM.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+        DOM.statusText.textContent = 'Odaya Bağlanılıyor...';
+        const conn = peer.connect(hostRoomId, {
+          metadata: { name: AppState.user.name }
+        });
+        setupConnectionHandlers(conn);
+      });
+
+      peer.on('call', (call) => {
+        handleIncomingCall(call);
+      });
+    }
+
+    function handleIncomingCall(call) {
+      call.answer(); // Gelen video yayınını kabul et
+      call.on('stream', (remoteStream) => {
+        AppState.video.type = 'local';
+        DOM.videoPlaceholder.classList.add('hidden');
+        DOM.ytPlayerWrapper.classList.add('hidden');
+        DOM.nativeVideoPlayer.classList.remove('hidden');
+        DOM.nativeVideoPlayer.src = '';
+        DOM.nativeVideoPlayer.srcObject = remoteStream;
+        DOM.nativeVideoPlayer.play().catch(e => console.log('Autoplay:', e));
+        startPlaybackTicker();
+        showToast('📺 Arkadaşınızın bilgisayarındaki canlı video yayını bağlandı!');
+      });
+    }
+
+    function setupConnectionHandlers(conn) {
+      conn.on('open', () => {
+        AppState.room.connectedPeers.set(conn.peer, {
+          conn: conn,
+          name: conn.metadata?.name || 'Misafir',
+          status: 'idle'
+        });
+
+        DOM.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+        DOM.statusText.textContent = 'Bağlı (' + (AppState.room.connectedPeers.size + 1) + ' Kişi)';
+
+        // Odaya yeni katılan kişiye güncel video ve segment durumunu gönder
+        sendData(conn, {
+          type: 'SYNC_FULL_STATE',
+          user: AppState.user,
+          video: {
+            type: AppState.video.type,
+            ytId: AppState.video.ytId,
+            currentTime: AppState.video.currentTime,
+            isPlaying: AppState.video.isPlaying
+          },
+          segments: AppState.segments.map(s => ({
+            id: s.id,
+            title: s.title,
+            start: s.start,
+            end: s.end,
+            assignedTo: s.assignedTo,
+            recordedBy: s.recordedBy,
+            hasAudio: !!s.audioBlob,
+            status: s.status
+          }))
+        });
+
+        updatePresenceUI();
+      });
+
+      conn.on('data', (data) => {
+        handleIncomingPeerMessage(conn, data);
+      });
+
+      conn.on('close', () => {
+        AppState.room.connectedPeers.delete(conn.peer);
+        updatePresenceUI();
+        DOM.statusText.textContent = 'Bağlı (' + (AppState.room.connectedPeers.size + 1) + ' Kişi)';
+      });
+    }
+
+    function broadcastData(payload) {
+      AppState.room.connectedPeers.forEach(peerInfo => {
+        if (peerInfo.conn && peerInfo.conn.open) {
+          peerInfo.conn.send(payload);
+        }
+      });
+    }
+
+    function sendData(conn, payload) {
+      if (conn && conn.open) {
+        conn.send(payload);
+      }
+    }
+
+    function broadcastStatus() {
+      broadcastData({
+        type: 'STATUS_UPDATE',
+        user: AppState.user
+      });
+      updatePresenceUI();
+    }
+
+    // Gelen P2P Mesajlarını Yönet
+    function handleIncomingPeerMessage(conn, data) {
+      switch (data.type) {
+        case 'STATUS_UPDATE':
+          if (AppState.room.connectedPeers.has(conn.peer)) {
+            const p = AppState.room.connectedPeers.get(conn.peer);
+            p.name = data.user.name;
+            p.status = data.user.status;
+            updatePresenceUI();
+          }
+          break;
+
+        case 'VIDEO_LOAD':
+          if (data.videoType === 'youtube' && data.ytId) {
+            loadYoutubeVideo(data.ytId, false);
+          }
+          break;
+
+        case 'VIDEO_PLAY':
+          seekAndPlayVideo(data.time, false);
+          break;
+
+        case 'VIDEO_PAUSE':
+          pauseVideo(false);
+          break;
+
+        case 'LOCAL_VIDEO_ANNOUNCE':
+          showToast(`🎬 Arkadaşınız "${escapeHtml(data.fileName)}" videosunu yükledi. Siz de aynı videoyu seçebilir veya canlı yayını izleyebilirsiniz!`);
+          break;
+
+        case 'VIDEO_SPEED':
+          if (AppState.video.type === 'local') {
+            DOM.nativeVideoPlayer.playbackRate = data.speed;
+          } else if (AppState.video.type === 'youtube' && ytPlayer && ytPlayer.setPlaybackRate) {
+            ytPlayer.setPlaybackRate(data.speed);
+          }
+          if (DOM.videoSpeedSelect) DOM.videoSpeedSelect.value = data.speed;
+          break;
+
+        case 'SEGMENT_ADD':
+          if (!AppState.segments.find(s => s.id === data.segment.id)) {
+            AppState.segments.push(data.segment);
+            renderSegmentsList();
+          }
+          break;
+
+        case 'SEGMENT_AUDIO_SHARED':
+          // Karşı taraf kaydettiği sesi odaya onaylayıp gönderdi
+          const seg = AppState.segments.find(s => s.id === data.segmentId);
+          if (seg) {
+            seg.recordedBy = data.recordedBy;
+            seg.status = 'approved';
+            
+            // Convert Base64 to Blob
+            const blob = base64ToBlob(data.audioBase64, data.mimeType || 'audio/webm');
+            seg.audioBlob = blob;
+            seg.audioUrl = URL.createObjectURL(blob);
+            renderSegmentsList();
+
+            showToast(`🎙️ ${data.recordedBy} "${seg.title}" parçası için ses kaydını yükledi!`);
+          }
+          break;
+
+        case 'SYNC_FULL_STATE':
+          // Host'tan gelen tam durum
+          if (data.video && data.video.type === 'youtube' && data.video.ytId) {
+            loadYoutubeVideo(data.video.ytId, false);
+          }
+          if (data.segments && Array.isArray(data.segments)) {
+            data.segments.forEach(remoteSeg => {
+              if (!AppState.segments.find(s => s.id === remoteSeg.id)) {
+                AppState.segments.push({
+                  ...remoteSeg,
+                  audioBlob: null,
+                  audioUrl: null
+                });
+              }
+            });
+            renderSegmentsList();
+          }
+          break;
+      }
+    }
+
+    // Katılımcı Durumları UI Güncelleme
+    function updatePresenceUI() {
+      DOM.localUserBadge.textContent = AppState.user.name;
+      
+      let statusDesc = 'Bekliyor';
+      let dotColor = 'bg-emerald-400';
+      if (AppState.user.status === 'recording') {
+        statusDesc = 'Kayıt Yapıyor 🔴';
+        dotColor = 'bg-red-500 animate-ping';
+      } else if (AppState.user.status === 'reviewing') {
+        statusDesc = 'Kaydını Dinliyor 🎧';
+        dotColor = 'bg-violet-400';
+      }
+
+      let html = `
+        <div class="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700 text-xs">
+          <span class="w-2 h-2 rounded-full ${dotColor}"></span>
+          <span class="font-semibold text-slate-200">${escapeHtml(AppState.user.name)}</span>
+          <span class="text-[10px] text-slate-400">(${statusDesc})</span>
+        </div>
+      `;
+
+      AppState.room.connectedPeers.forEach(p => {
+        let pStatus = 'Bekliyor';
+        let pDot = 'bg-emerald-400';
+        if (p.status === 'recording') {
+          pStatus = 'Kayıt Yapıyor 🔴';
+          pDot = 'bg-red-500 animate-ping';
+        } else if (p.status === 'reviewing') {
+          pStatus = 'Kaydını Dinliyor 🎧';
+          pDot = 'bg-violet-400';
+        }
+
+        html += `
+          <div class="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700 text-xs">
+            <span class="w-2 h-2 rounded-full ${pDot}"></span>
+            <span class="font-semibold text-slate-200">${escapeHtml(p.name)}</span>
+            <span class="text-[10px] text-slate-400">(${pStatus})</span>
+          </div>
+        `;
+      });
+
+      DOM.usersList.innerHTML = html;
+    }
+
+    // ================= ROOM BUTTONS =================
+    DOM.btnCreateRoom.addEventListener('click', () => {
+      AppState.room.isHost = true;
+      initPeer();
+    });
+
+    DOM.btnJoinRoom.addEventListener('click', () => {
+      const code = DOM.roomCodeInput.value.trim().toUpperCase();
+      if (!code) {
+        alert('Lütfen bir oda kodu girin.');
+        return;
+      }
+      AppState.room.isHost = false;
+      connectToHost(code);
+    });
+
+    DOM.btnShareRoom.addEventListener('click', () => {
+      const shareUrl = window.location.href;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(shareUrl).then(() => {
+          showToast('🔗 Oda linki panoya kopyalandı! Arkadaşına gönder.');
+        });
+      } else {
+        prompt('Oda linkiniz:', shareUrl);
+      }
+    });
+
+    DOM.displayRoomCode.addEventListener('click', () => {
+      const code = DOM.displayRoomCode.textContent;
+      if (code && code !== '---') {
+        navigator.clipboard?.writeText(code);
+        showToast('Oda kodu kopyalandı: ' + code);
+      }
+    });
+
+    // Sayfa açıldığında linkte `?room=XYZ` varsa otomatik katıl
+    window.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room');
+      if (roomParam) {
+        DOM.roomCodeInput.value = roomParam;
+        connectToHost(roomParam);
+      }
+    });
+
+    // ================= VIDEO PLAYER MANAGEMENT =================
+    let ytPlayer = null;
+    let ytApiReady = false;
+    let ytApiFailedTimeout = null;
+
+    // Load YouTube IFrame API dynamically
+    window.onYouTubeIframeAPIReady = function() {
+      ytApiReady = true;
+      if (ytApiFailedTimeout) clearTimeout(ytApiFailedTimeout);
+    };
+    (function loadYtScript() {
+      const tag = document.createElement('script');
+      tag.src = "https://www.youtube.com/iframe_api";
+      tag.onerror = () => {
+        showYtError('YouTube IFrame API dosyası yüklenemedi. İnternet bağlantınızı kontrol edin.');
+      };
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+      // Eğer birkaç saniye içinde API hazır olmazsa, muhtemelen file:// veya CSP kısıtlaması vardır
+      ytApiFailedTimeout = setTimeout(() => {
+        if (!ytApiReady) {
+          showYtError('YouTube oynatıcısı başlatılamadı. Bu genellikle sayfayı doğrudan dosya (file://) olarak açtığınızda olur — lütfen bir yerel sunucudan (http://localhost) açmayı deneyin.');
+        }
+      }, 6000);
+    })();
+
+    function showYtError(msg) {
+      if (DOM.ytErrorNotice) {
+        DOM.ytErrorNotice.textContent = '⚠️ ' + msg;
+        DOM.ytErrorNotice.classList.remove('hidden');
+      }
+    }
+
+    // Tab Switching
+    DOM.tabYoutube.addEventListener('click', () => {
+      DOM.tabYoutube.className = 'px-2.5 py-1 rounded-md text-xs font-semibold bg-violet-600 text-white transition';
+      DOM.tabLocal.className = 'px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition';
+      DOM.youtubeInputContainer.classList.remove('hidden');
+      DOM.localInputContainer.classList.add('hidden');
+    });
+
+    DOM.tabLocal.addEventListener('click', () => {
+      DOM.tabLocal.className = 'px-2.5 py-1 rounded-md text-xs font-semibold bg-violet-600 text-white transition';
+      DOM.tabYoutube.className = 'px-2.5 py-1 rounded-md text-xs font-semibold text-slate-400 hover:text-white transition';
+      DOM.localInputContainer.classList.remove('hidden');
+      DOM.youtubeInputContainer.classList.add('hidden');
+    });
+
+    // YouTube ID Extractor
+    function extractYoutubeId(url) {
+      const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+      const match = url.match(regExp);
+      return (match && match[2].length === 11) ? match[2] : null;
+    }
+
+    DOM.btnLoadYt.addEventListener('click', () => {
+      const url = DOM.ytUrlInput.value.trim();
+      const videoId = extractYoutubeId(url);
+      if (!videoId) {
+        alert('Geçerli bir YouTube linki giriniz.');
+        return;
+      }
+      if (window.location.protocol === 'file:') {
+        showYtError('YouTube videoları file:// protokolünde çalışmayabilir. Sayfayı bir yerel sunucudan (örn. http://localhost) açmanız önerilir.');
+      }
+      loadYoutubeVideo(videoId, true);
+    });
+
+    function loadYoutubeVideo(videoId, broadcast = true) {
+      if (!ytApiReady) {
+        showYtError('YouTube API henüz hazır değil. Sayfayı bir yerel sunucudan (http://localhost) açtığınızdan emin olun ve birkaç saniye bekleyip tekrar deneyin.');
+        // API hazır olunca otomatik dene
+        const waitForApi = setInterval(() => {
+          if (ytApiReady) {
+            clearInterval(waitForApi);
+            loadYoutubeVideo(videoId, broadcast);
+          }
+        }, 500);
+        return;
+      }
+      if (DOM.ytErrorNotice) DOM.ytErrorNotice.classList.add('hidden');
+
+      AppState.video.type = 'youtube';
+      AppState.video.ytId = videoId;
+
+      DOM.videoPlaceholder.classList.add('hidden');
+      DOM.nativeVideoPlayer.classList.add('hidden');
+      DOM.ytPlayerWrapper.classList.remove('hidden');
+
+      try {
+        if (ytPlayer && ytPlayer.loadVideoById) {
+          ytPlayer.loadVideoById(videoId);
+        } else {
+          ytPlayer = new YT.Player('ytPlayer', {
+            videoId: videoId,
+            playerVars: {
+              'playsinline': 1,
+              'rel': 0,
+              'modestbranding': 1,
+              'enablejsapi': 1,
+              'origin': window.location.origin
+            },
+            events: {
+              'onReady': onYtPlayerReady,
+              'onStateChange': onYtStateChange,
+              'onError': onYtPlayerError
+            }
+          });
+        }
+      } catch (err) {
+        showYtError('YouTube oynatıcısı başlatılırken hata oluştu: ' + err.message + ' — Sayfayı http://localhost üzerinden açmayı deneyin.');
+      }
+
+      if (broadcast) {
+        broadcastData({
+          type: 'VIDEO_LOAD',
+          videoType: 'youtube',
+          ytId: videoId
+        });
+      }
+    }
+
+    function onYtPlayerReady(event) {
+      startPlaybackTicker();
+      // Video süresi hazır olunca bitiş inputunu otomatik son saniyeye ayarla
+      autoFillSegmentEndFromDuration();
+    }
+
+    function onYtPlayerError(event) {
+      const codes = {
+        2: 'Geçersiz video ID.',
+        5: 'HTML5 oynatıcı hatası.',
+        100: 'Video bulunamadı veya kaldırılmış.',
+        101: 'Video sahibi bu videonun başka sitelerde (embed) oynatılmasına izin vermiyor.',
+        150: 'Video sahibi bu videonun başka sitelerde (embed) oynatılmasına izin vermiyor.'
+      };
+      const msg = codes[event.data] || ('Bilinmeyen YouTube hatası (kod: ' + event.data + ')');
+      showYtError(msg);
+    }
+
+    function onYtStateChange(event) {
+      if (event.data === YT.PlayerState.PLAYING) {
+        AppState.video.isPlaying = true;
+        DOM.playIcon.classList.add('hidden');
+        DOM.pauseIcon.classList.remove('hidden');
+      } else {
+        AppState.video.isPlaying = false;
+        DOM.playIcon.classList.remove('hidden');
+        DOM.pauseIcon.classList.add('hidden');
+      }
+    }
+
+    // Video süresi bulununca segment bitişini otomatik doldur (kullanıcı manuel değiştirebilir)
+    function autoFillSegmentEndFromDuration() {
+      const dur = getVideoDuration();
+      if (dur && dur > 0) {
+        DOM.segmentEndInput.value = dur.toFixed(1);
+        if (!DOM.segmentStartInput.value) {
+          DOM.segmentStartInput.value = '0.0';
+        }
+      } else {
+        // Süre henüz hazır değilse kısa süre sonra tekrar dene
+        setTimeout(autoFillSegmentEndFromDuration, 500);
+      }
+    }
+
+    // Local Video File Handler
+    function loadLocalVideoFile(file) {
+      const url = URL.createObjectURL(file);
+      AppState.video.type = 'local';
+      AppState.video.localUrl = url;
+
+      DOM.videoPlaceholder.classList.add('hidden');
+      DOM.ytPlayerWrapper.classList.add('hidden');
+      DOM.nativeVideoPlayer.classList.remove('hidden');
+
+      DOM.nativeVideoPlayer.srcObject = null;
+      DOM.nativeVideoPlayer.src = url;
+      DOM.nativeVideoPlayer.load();
+
+      if (DOM.loadedVideoFileName) {
+        DOM.loadedVideoFileName.textContent = file.name;
+      }
+      if (DOM.btnStreamLocalVideo) {
+        DOM.btnStreamLocalVideo.classList.remove('hidden');
+        DOM.btnStreamLocalVideo.classList.add('flex');
+      }
+
+      // Metadata yüklenince süreyi al ve bitiş inputunu otomatik doldur
+      DOM.nativeVideoPlayer.addEventListener('loadedmetadata', function onMeta() {
+        DOM.nativeVideoPlayer.removeEventListener('loadedmetadata', onMeta);
+        autoFillSegmentEndFromDuration();
+      });
+
+      startPlaybackTicker();
+
+      broadcastData({
+        type: 'LOCAL_VIDEO_ANNOUNCE',
+        fileName: file.name
+      });
+
+      showToast(`📁 "${file.name}" yüklendi. Şimdi oynatabilir veya "Canlı Yayınla" ile arkadaşınıza aktarabilirsiniz!`);
+    }
+
+    DOM.localVideoFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        loadLocalVideoFile(file);
+      }
+    });
+
+    // Drag & Drop on Video Container
+    const videoDropArea = DOM.videoPlayerContainer;
+    if (videoDropArea) {
+      ['dragenter', 'dragover'].forEach(eventName => {
+        videoDropArea.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          videoDropArea.classList.add('border-violet-500', 'ring-4', 'ring-violet-500/30');
+        });
+      });
+      ['dragleave', 'drop'].forEach(eventName => {
+        videoDropArea.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          videoDropArea.classList.remove('border-violet-500', 'ring-4', 'ring-violet-500/30');
+        });
+      });
+      videoDropArea.addEventListener('drop', (e) => {
+        const file = e.dataTransfer.files[0];
+        if (file) {
+          loadLocalVideoFile(file);
+        }
+      });
+    }
+
+    // Stream Local Video via WebRTC
+    if (DOM.btnStreamLocalVideo) {
+      DOM.btnStreamLocalVideo.addEventListener('click', () => {
+        if (!DOM.nativeVideoPlayer.src && !DOM.nativeVideoPlayer.srcObject) {
+          alert('Önce bir video dosyası seçin.');
+          return;
+        }
+
+        let stream = null;
+        if (DOM.nativeVideoPlayer.captureStream) {
+          stream = DOM.nativeVideoPlayer.captureStream();
+        } else if (DOM.nativeVideoPlayer.mozCaptureStream) {
+          stream = DOM.nativeVideoPlayer.mozCaptureStream();
+        }
+
+        if (!stream) {
+          if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }).then(screenStream => {
+              sendStreamToPeers(screenStream);
+            }).catch(err => {
+              alert('Ekran paylaşımı başlatılamadı: ' + err.message);
+            });
+          } else {
+            alert('Tarayıcınız doğrudan video akışını desteklemiyor. Arkadaşınız da aynı videoyu seçebilir.');
+          }
+          return;
+        }
+
+        sendStreamToPeers(stream);
+      });
+    }
+
+    function sendStreamToPeers(stream) {
+      let count = 0;
+      AppState.room.connectedPeers.forEach(p => {
+        if (p.conn && p.conn.peer) {
+          peer.call(p.conn.peer, stream, { metadata: { type: 'VIDEO_STREAM' } });
+          count++;
+        }
+      });
+      if (count > 0) {
+        showToast(`📡 Video canlı olarak odadaki ${count} kişiye yayınlanıyor!`);
+      } else {
+        showToast('📡 Canlı yayın aktif! Odaya katılan arkadaşınıza aktarılacak.');
+      }
+    }
+
+    // Skip Buttons
+    if (DOM.btnSkipBack) {
+      DOM.btnSkipBack.addEventListener('click', () => {
+        const cur = getCurrentVideoTime();
+        seekAndPlayVideo(Math.max(0, cur - 5), true);
+      });
+    }
+    if (DOM.btnSkipForward) {
+      DOM.btnSkipForward.addEventListener('click', () => {
+        const cur = getCurrentVideoTime();
+        seekAndPlayVideo(cur + 5, true);
+      });
+    }
+
+    // Volume Ducking & Mute
+    if (DOM.videoVolumeSlider) {
+      DOM.videoVolumeSlider.addEventListener('input', (e) => {
+        const vol = parseFloat(e.target.value);
+        DOM.nativeVideoPlayer.volume = vol;
+        if (ytPlayer && ytPlayer.setVolume) {
+          ytPlayer.setVolume(vol * 100);
+        }
+        DOM.btnToggleMute.textContent = vol === 0 ? '🔇' : '🔊';
+      });
+    }
+
+    if (DOM.btnToggleMute) {
+      DOM.btnToggleMute.addEventListener('click', () => {
+        if (DOM.nativeVideoPlayer.muted || (ytPlayer && ytPlayer.isMuted && ytPlayer.isMuted())) {
+          DOM.nativeVideoPlayer.muted = false;
+          if (ytPlayer && ytPlayer.unMute) ytPlayer.unMute();
+          DOM.btnToggleMute.textContent = '🔊';
+        } else {
+          DOM.nativeVideoPlayer.muted = true;
+          if (ytPlayer && ytPlayer.mute) ytPlayer.mute();
+          DOM.btnToggleMute.textContent = '🔇';
+        }
+      });
+    }
+
+    // Speed Rate Change
+    if (DOM.videoSpeedSelect) {
+      DOM.videoSpeedSelect.addEventListener('change', (e) => {
+        const speed = parseFloat(e.target.value);
+        if (AppState.video.type === 'local') {
+          DOM.nativeVideoPlayer.playbackRate = speed;
+        } else if (AppState.video.type === 'youtube' && ytPlayer && ytPlayer.setPlaybackRate) {
+          ytPlayer.setPlaybackRate(speed);
+        }
+        broadcastData({
+          type: 'VIDEO_SPEED',
+          speed: speed
+        });
+      });
+    }
+
+    // Playback Helpers
+    function getCurrentVideoTime() {
+      if (AppState.video.type === 'youtube' && ytPlayer && ytPlayer.getCurrentTime) {
+        return ytPlayer.getCurrentTime() || 0;
+      } else if (AppState.video.type === 'local') {
+        return DOM.nativeVideoPlayer.currentTime || 0;
+      }
+      return 0;
+    }
+
+    function getVideoDuration() {
+      if (AppState.video.type === 'youtube' && ytPlayer && ytPlayer.getDuration) {
+        return ytPlayer.getDuration() || 0;
+      } else if (AppState.video.type === 'local') {
+        return DOM.nativeVideoPlayer.duration || 0;
+      }
+      return 0;
+    }
+
+    function seekAndPlayVideo(timeSec, broadcast = true) {
+      if (AppState.video.type === 'youtube' && ytPlayer && ytPlayer.seekTo) {
+        ytPlayer.seekTo(timeSec, true);
+        ytPlayer.playVideo();
+      } else if (AppState.video.type === 'local') {
+        DOM.nativeVideoPlayer.currentTime = timeSec;
+        DOM.nativeVideoPlayer.play();
+      }
+
+      if (broadcast) {
+        broadcastData({
+          type: 'VIDEO_PLAY',
+          time: timeSec
+        });
+      }
+    }
+
+    function pauseVideo(broadcast = true) {
+      if (AppState.video.type === 'youtube' && ytPlayer && ytPlayer.pauseVideo) {
+        ytPlayer.pauseVideo();
+      } else if (AppState.video.type === 'local') {
+        DOM.nativeVideoPlayer.pause();
+      }
+
+      if (broadcast) {
+        broadcastData({
+          type: 'VIDEO_PAUSE'
+        });
+      }
+    }
+
+    DOM.btnPlayPauseSync.addEventListener('click', () => {
+      if (activeDubbingSegmentId) {
+        stopDubbingPreview();
+        return;
+      }
+      const curr = getCurrentVideoTime();
+      if (AppState.video.isPlaying) {
+        pauseVideo(true);
+      } else {
+        seekAndPlayVideo(curr, true);
+      }
+    });
+
+    // Time ticker (tek bir interval, tekrar tekrar başlatılmasın diye korumalı)
+    let playbackTickerStarted = false;
+    function startPlaybackTicker() {
+      if (playbackTickerStarted) return;
+      playbackTickerStarted = true;
+      setInterval(() => {
+        const cur = getCurrentVideoTime();
+        const dur = getVideoDuration();
+        AppState.video.currentTime = cur;
+        AppState.video.duration = dur;
+        DOM.timeDisplay.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+      }, 250);
+    }
+
+    // Set In / Out button shortcuts
+    DOM.btnSetInPoint.addEventListener('click', () => {
+      const cur = getCurrentVideoTime();
+      DOM.segmentStartInput.value = cur.toFixed(1);
+    });
+    DOM.btnSetOutPoint.addEventListener('click', () => {
+      const cur = getCurrentVideoTime();
+      DOM.segmentEndInput.value = cur.toFixed(1);
+    });
+
+    // ================= SEGMENT (SAHNE) MANAGEMENT =================
+    DOM.btnAddSegment.addEventListener('click', () => {
+      const title = DOM.segmentTitleInput.value.trim() || `Sahne ${AppState.segments.length + 1}`;
+      const start = parseFloat(DOM.segmentStartInput.value);
+      let end = parseFloat(DOM.segmentEndInput.value);
+
+      // Eğer bitiş boş/geçersizse ve video yüklüyse, otomatik videonun sonuna ayarla
+      if ((isNaN(end) || end <= 0) && getVideoDuration() > 0) {
+        end = getVideoDuration();
+      }
+
+      const assignedTo = document.querySelector('input[name="assignedTo"]:checked')?.value || 'me';
+
+      if (isNaN(start) || isNaN(end) || end <= start) {
+        alert('Lütfen geçerli bir başlangıç ve bitiş saniyesi girin (Bitiş > Başlangıç olmalı).');
+        return;
+      }
+
+      const newSegment = {
+        id: 'seg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        title: title,
+        start: start,
+        end: end,
+        assignedTo: assignedTo, // 'me' | 'friend' | 'both'
+        recordedBy: null,
+        audioBlob: null,
+        audioUrl: null,
+        status: 'pending' // 'pending' | 'approved'
+      };
+
+      AppState.segments.push(newSegment);
+      renderSegmentsList();
+
+      // Broadcast to room
+      broadcastData({
+        type: 'SEGMENT_ADD',
+        segment: newSegment
+      });
+
+      // Clear inputs — bir sonraki segment için başlangıcı bu segmentin bitişine,
+      // bitişi ise videonun toplam süresine ayarla (üzerine yazılabilir)
+      DOM.segmentTitleInput.value = '';
+      DOM.segmentStartInput.value = end.toFixed(1);
+      const totalDur = getVideoDuration();
+      DOM.segmentEndInput.value = totalDur > end ? totalDur.toFixed(1) : (end + 10).toFixed(1);
+    });
+
+    function renderSegmentsList() {
+      DOM.segmentCountBadge.textContent = `${AppState.segments.length} Parça`;
+
+      if (AppState.segments.length === 0) {
+        DOM.noSegmentsNotice.classList.remove('hidden');
+        DOM.segmentsListContainer.innerHTML = '';
+        DOM.segmentsListContainer.appendChild(DOM.noSegmentsNotice);
+        return;
+      }
+
+      DOM.noSegmentsNotice.classList.add('hidden');
+      DOM.segmentsListContainer.innerHTML = '';
+
+      // Sort segments by start time
+      AppState.segments.sort((a, b) => a.start - b.start);
+
+      AppState.segments.forEach((seg, index) => {
+        const isSelected = AppState.activeSegmentId === seg.id;
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-xl border transition cursor-pointer flex flex-col gap-2 ${
+          isSelected 
+            ? 'bg-violet-900/30 border-violet-500 shadow-md shadow-violet-500/10' 
+            : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+        }`;
+
+        // Assignment label
+        let assignedBadge = `<span class="bg-blue-500/20 text-blue-300 text-[10px] px-2 py-0.5 rounded font-medium">👤 Ben</span>`;
+        if (seg.assignedTo === 'friend') {
+          assignedBadge = `<span class="bg-amber-500/20 text-amber-300 text-[10px] px-2 py-0.5 rounded font-medium">👥 Arkadaşım</span>`;
+        } else if (seg.assignedTo === 'both') {
+          assignedBadge = `<span class="bg-fuchsia-500/20 text-fuchsia-300 text-[10px] px-2 py-0.5 rounded font-medium">🎭 İkimiz</span>`;
+        }
+
+        // Status badge
+        let statusBadge = `<span class="text-[10px] text-slate-500">Kayıt Yok</span>`;
+        if (seg.status === 'approved' && seg.audioBlob) {
+          statusBadge = `<span class="text-[10px] text-emerald-400 font-bold flex items-center gap-1">✅ ${escapeHtml(seg.recordedBy || 'Kaydedildi')}</span>`;
+        }
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="w-5 h-5 rounded-full bg-slate-800 text-[11px] font-bold flex items-center justify-center text-slate-400">${index + 1}</span>
+              <span class="text-xs font-bold text-slate-200">${escapeHtml(seg.title)}</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              ${assignedBadge}
+              ${statusBadge}
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-[11px] text-slate-400 font-mono flex-wrap gap-1 pt-1 border-t border-slate-800/60">
+            <span>⏱️ ${formatTime(seg.start)} - ${formatTime(seg.end)} (${(seg.end - seg.start).toFixed(1)}s)</span>
+
+            <div class="flex items-center gap-1 flex-wrap">
+              <button class="btnPlaySegment hover:text-white px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] transition" data-id="${seg.id}" title="Yalnızca videoyu orijinal sesiyle oynatır">
+                ▶️ Sahne
+              </button>
+              ${seg.audioUrl ? `
+                <button class="btnListenAudio hover:text-emerald-300 px-2 py-0.5 rounded bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-[10px] transition" data-id="${seg.id}" title="Yalnızca kaydedilen sesi dinletir">
+                  🔊 Ses
+                </button>
+                <button class="btnDubbedPreview ${activeDubbingSegmentId === seg.id ? 'bg-fuchsia-600 text-white animate-pulse' : 'bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white'} px-2.5 py-0.5 rounded text-[10px] font-bold transition flex items-center gap-1 shadow active:scale-95" data-id="${seg.id}" title="Video sesini kısıp kaydedilen sesinizi videoyla birebir senkron oynatır">
+                  ${activeDubbingSegmentId === seg.id ? '⏹️ Durdur' : '🎭 Dublajlı İzle'}
+                </button>
+                <button class="btnDownloadDubbed hover:text-white px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] transition" data-id="${seg.id}" title="Bu parçanın ses kaydını indir">
+                  ⬇️ İndir
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.btnPlaySegment') || e.target.closest('.btnListenAudio') || e.target.closest('.btnDubbedPreview') || e.target.closest('.btnDownloadDubbed')) return;
+          selectSegment(seg.id);
+        });
+
+        const btnPlay = card.querySelector('.btnPlaySegment');
+        btnPlay.addEventListener('click', (e) => {
+          e.stopPropagation();
+          stopDubbingPreview();
+          selectSegment(seg.id);
+          seekAndPlayVideo(seg.start, true);
+        });
+
+        const btnListen = card.querySelector('.btnListenAudio');
+        if (btnListen && seg.audioUrl) {
+          btnListen.addEventListener('click', (e) => {
+            e.stopPropagation();
+            stopDubbingPreview();
+            playAudioUrl(seg.audioUrl);
+          });
+        }
+
+        const btnDubbed = card.querySelector('.btnDubbedPreview');
+        if (btnDubbed && seg.audioUrl) {
+          btnDubbed.addEventListener('click', (e) => {
+            e.stopPropagation();
+            playSegmentWithDubbing(seg);
+          });
+        }
+
+        const btnDownload = card.querySelector('.btnDownloadDubbed');
+        if (btnDownload && seg.audioUrl) {
+          btnDownload.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const ext = (seg.audioBlob && seg.audioBlob.type && seg.audioBlob.type.includes('webm')) ? 'webm' : 'audio';
+            downloadBlob(seg.audioBlob, `${sanitizeFilename(seg.title)}_${ext}.webm`);
+          });
+        }
+
+        DOM.segmentsListContainer.appendChild(card);
+      });
+    }
+
+    // ================= DUBLAJLI SENKRON ÖNİZLEME (VİDEO SESİNİ KIS, BİZİM SESİ OYNAT) =================
+    let activeDubbingAudio = null;
+    let activeDubbingSegmentId = null;
+    let activeDubbingInterval = null;
+    let activeDubbingSeekedListener = null;
+    let restoreVideoAudioCallback = null;
+    let dubbingSessionToken = 0;   // Her oturumda artar; eski async callback'leri geçersiz kılar
+
+    function stopDubbingPreview() {
+      // Bekleyen tüm async callback'leri (setTimeout / seeked) geçersiz kıl
+      dubbingSessionToken++;
+
+      // Local video seeked listener'ı temizle
+      if (activeDubbingSeekedListener) {
+        try { DOM.nativeVideoPlayer.removeEventListener('seeked', activeDubbingSeekedListener); } catch (e) {}
+        activeDubbingSeekedListener = null;
+      }
+
+      // Dublaj sesini durdur
+      if (activeDubbingAudio) {
+        try {
+          activeDubbingAudio.pause();
+          activeDubbingAudio.currentTime = 0;
+          activeDubbingAudio.onended = null;
+          activeDubbingAudio.onerror = null;
+        } catch (e) {}
+        activeDubbingAudio = null;
+      }
+
+      // İnterval'i temizle
+      if (activeDubbingInterval) {
+        clearInterval(activeDubbingInterval);
+        activeDubbingInterval = null;
+      }
+
+      // Video ses seviyesini geri getir
+      if (restoreVideoAudioCallback) {
+        try { restoreVideoAudioCallback(); } catch (e) {}
+        restoreVideoAudioCallback = null;
+      }
+
+      const wasActive = !!activeDubbingSegmentId;
+      activeDubbingSegmentId = null;
+      DOM.dubbingModeBadge.classList.add('hidden');
+
+      if (wasActive) {
+        pauseVideo(false);
+      }
+      renderSegmentsList();
+    }
+
+    function playSegmentWithDubbing(seg) {
+      if (!seg || !seg.audioUrl) return;
+
+      // Aynı segmente tekrar basıldı → durdur
+      if (activeDubbingSegmentId === seg.id) {
+        stopDubbingPreview();
+        return;
+      }
+
+      // Önceki oturumu tamamen kapat
+      stopDubbingPreview();
+
+      // Yeni oturum token'ı
+      const myToken = ++dubbingSessionToken;
+      const stillValid = () => myToken === dubbingSessionToken;
+
+      selectSegment(seg.id);
+      activeDubbingSegmentId = seg.id;
+      DOM.dubbingModeBadge.classList.remove('hidden');
+
+      // 1. Orijinal video ses durumunu sakla ve videoyu sessize al
+      let origLocalMuted = false;
+      let origYtMuted = false;
+
+      if (AppState.video.type === 'local') {
+        origLocalMuted = DOM.nativeVideoPlayer.muted;
+        DOM.nativeVideoPlayer.muted = true;
+      } else if (AppState.video.type === 'youtube' && ytPlayer) {
+        origYtMuted = ytPlayer.isMuted ? ytPlayer.isMuted() : false;
+        if (ytPlayer.mute) ytPlayer.mute();
+      }
+
+      restoreVideoAudioCallback = () => {
+        if (AppState.video.type === 'local') {
+          DOM.nativeVideoPlayer.muted = origLocalMuted;
+        } else if (AppState.video.type === 'youtube' && ytPlayer) {
+          if (!origYtMuted && ytPlayer.unMute) ytPlayer.unMute();
+        }
+      };
+
+      // 2. Dublaj sesini oluştur
+      const audio = new Audio(seg.audioUrl);
+      audio.preload = 'auto';
+      activeDubbingAudio = audio;
+
+      audio.onended = () => {
+        if (stillValid()) stopDubbingPreview();
+      };
+
+      const startBoth = () => {
+        if (!stillValid() || !activeDubbingAudio) return;
+        try {
+          activeDubbingAudio.currentTime = 0;
+          const p = activeDubbingAudio.play();
+          if (p && p.catch) p.catch(e => console.warn('Dublaj sesi başlatılamadı:', e));
+        } catch (e) {
+          console.warn('Dublaj sesi başlatma hatası:', e);
+        }
+      };
+
+      // 3. Videoyu segment başına sar; sesi video gerçekten oraya ulaşınca başlat
+      if (AppState.video.type === 'local') {
+        const onSeeked = () => {
+          if (activeDubbingSeekedListener === onSeeked) {
+            try { DOM.nativeVideoPlayer.removeEventListener('seeked', onSeeked); } catch (e) {}
+            activeDubbingSeekedListener = null;
+          }
+          if (!stillValid()) return;
+          startBoth();
+        };
+        activeDubbingSeekedListener = onSeeked;
+        DOM.nativeVideoPlayer.addEventListener('seeked', onSeeked);
+        seekAndPlayVideo(seg.start, false);
+      } else {
+        seekAndPlayVideo(seg.start, false);
+        // YouTube seekTo asenkron — biraz daha uzun bekle, sonra sesi çal
+        setTimeout(() => {
+          if (!stillValid()) return;
+          startBoth();
+        }, 500);
+      }
+
+      showToast(`🎭 "${seg.title}" orijinal video sesi kısılarak dublajınızla eşzamanlı oynatılıyor!`);
+      renderSegmentsList();
+
+      // 4. Segment sonunu izle: önce videonun segment başına geldiğini GÖR, sonra bitişi kontrol et
+      let reachedSegmentStart = false;
+      const watchStart = Date.now();
+
+      activeDubbingInterval = setInterval(() => {
+        if (!stillValid()) {
+          clearInterval(activeDubbingInterval);
+          activeDubbingInterval = null;
+          return;
+        }
+        const cur = getCurrentVideoTime();
+
+        // Video henüz seek etmediyse (eski konumda) end kontrolü yapma
+        if (!reachedSegmentStart) {
+          // Segment başlangıcına 1.5 sn yaklaşınca veya 3 sn geçince "başladı" kabul et
+          const elapsed = (Date.now() - watchStart) / 1000;
+          if (Math.abs(cur - seg.start) < 1.5 || (elapsed > 3 && cur >= seg.start)) {
+            reachedSegmentStart = true;
+          }
+          return;
+        }
+
+        if (cur >= seg.end) {
+          stopDubbingPreview();
+        }
+      }, 200);
+    }
+
+    function selectSegment(segmentId) {
+      AppState.activeSegmentId = segmentId;
+      const seg = AppState.segments.find(s => s.id === segmentId);
+      if (seg) {
+        DOM.currentSelectedSegmentName.textContent = `${seg.title} (${formatTime(seg.start)} - ${formatTime(seg.end)})`;
+      }
+      renderSegmentsList();
+    }
+
+    // ================= AUDIO RECORDING & VISUALIZER =================
+    let audioContext = null;
+    let analyser = null;
+    let micStream = null;
+    let visualizerAnimationId = null;
+
+    async function initMicrophone() {
+      if (!micStream) {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          }
+        });
+
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        const source = audioContext.createMediaStreamSource(micStream);
+        source.connect(analyser);
+
+        drawVisualizer();
+      }
+      return micStream;
+    }
+
+    function drawVisualizer() {
+      const canvas = DOM.visualizerCanvas;
+      const ctx = canvas.getContext('2d');
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      function renderFrame() {
+        visualizerAnimationId = requestAnimationFrame(renderFrame);
+        analyser.getByteFrequencyData(dataArray);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const barWidth = (canvas.width / bufferLength) * 1.8;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const barHeight = (dataArray[i] / 255) * canvas.height * 0.85;
+          ctx.fillStyle = AppState.recording.isRecording ? '#ef4444' : '#8b5cf6';
+          ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+          x += barWidth + 2;
+        }
+      }
+      renderFrame();
+    }
+
+    // RECORDING WORKFLOW
+    DOM.btnStartRecording.addEventListener('click', async () => {
+      const seg = AppState.segments.find(s => s.id === AppState.activeSegmentId);
+      if (!seg) {
+        alert('Lütfen önce sağdaki listeden seslendirmek istediğiniz sahneyi seçin!');
+        return;
+      }
+
+      stopDubbingPreview();
+
+      try {
+        await initMicrophone();
+      } catch (err) {
+        alert('Mikrofon izni alınamadı: ' + err.message);
+        return;
+      }
+
+      // 3-2-1 Geri Sayım Başlat
+      DOM.countdownOverlay.classList.remove('hidden');
+      let count = 3;
+      DOM.countdownNumber.textContent = count;
+
+      const countdownInterval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          DOM.countdownNumber.textContent = count;
+        } else {
+          clearInterval(countdownInterval);
+          DOM.countdownOverlay.classList.add('hidden');
+          startActualRecording(seg);
+        }
+      }, 900);
+    });
+
+    function startActualRecording(seg) {
+      AppState.recording.isRecording = true;
+      AppState.recording.audioChunks = [];
+      AppState.recording.secondsElapsed = 0;
+
+      AppState.user.status = 'recording';
+      broadcastStatus();
+
+      // UI state
+      DOM.btnStartRecording.classList.add('hidden');
+      DOM.btnStopRecording.classList.remove('hidden');
+      DOM.recordingTimerBadge.classList.remove('hidden');
+      DOM.recordingTimerBadge.classList.add('flex');
+      DOM.micIdleNotice.classList.add('hidden');
+      DOM.personalReviewSection.classList.add('hidden');
+
+      // Video o segmentin başına sar ve oynat
+      seekAndPlayVideo(seg.start, true);
+
+      // MediaRecorder
+      const options = { mimeType: 'audio/webm;codecs=opus' };
+      if (!MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        delete options.mimeType; // Let browser pick default supported
+      }
+
+      AppState.recording.mediaRecorder = new MediaRecorder(micStream, options);
+      AppState.recording.mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          AppState.recording.audioChunks.push(e.data);
+        }
+      };
+
+      AppState.recording.mediaRecorder.onstop = () => {
+        const mime = AppState.recording.mediaRecorder.mimeType || 'audio/webm';
+        const blob = new Blob(AppState.recording.audioChunks, { type: mime });
+        AppState.recording.tempAudioBlob = blob;
+        AppState.recording.tempAudioUrl = URL.createObjectURL(blob);
+
+        // Kişisel onay ekranını aç
+        DOM.reviewAudioPlayer.src = AppState.recording.tempAudioUrl;
+        DOM.personalReviewSection.classList.remove('hidden');
+        AppState.user.status = 'reviewing';
+        broadcastStatus();
+      };
+
+      AppState.recording.mediaRecorder.start(200);
+
+      // Timer
+      AppState.recording.timerInterval = setInterval(() => {
+        AppState.recording.secondsElapsed++;
+        DOM.recordingTimer.textContent = formatTime(AppState.recording.secondsElapsed);
+
+        // Segment süresi bittiğinde otomatik durdur
+        const curTime = getCurrentVideoTime();
+        if (curTime >= seg.end) {
+          stopRecordingWorkflow();
+        }
+      }, 1000);
+    }
+
+    DOM.btnStopRecording.addEventListener('click', () => {
+      stopRecordingWorkflow();
+    });
+
+    function stopRecordingWorkflow() {
+      if (!AppState.recording.isRecording) return;
+      AppState.recording.isRecording = false;
+      clearInterval(AppState.recording.timerInterval);
+
+      if (AppState.recording.mediaRecorder && AppState.recording.mediaRecorder.state !== 'inactive') {
+        AppState.recording.mediaRecorder.stop();
+      }
+
+      pauseVideo(true);
+
+      DOM.btnStartRecording.classList.remove('hidden');
+      DOM.btnStopRecording.classList.add('hidden');
+      DOM.recordingTimerBadge.classList.add('hidden');
+      DOM.recordingTimerBadge.classList.remove('flex');
+    }
+
+    // ================= KİŞİSEL ONAMA VE ODAYA GÖNDERME =================
+    DOM.btnDiscardRecording.addEventListener('click', () => {
+      if (confirm('Bu kaydı silmek ve tekrar kaydetmek istiyor musunuz?')) {
+        DOM.personalReviewSection.classList.add('hidden');
+        try {
+          DOM.reviewAudioPlayer.pause();
+          DOM.reviewAudioPlayer.currentTime = 0;
+        } catch (e) {}
+        DOM.reviewAudioPlayer.src = '';
+        AppState.recording.tempAudioBlob = null;
+        if (AppState.recording.tempAudioUrl) {
+          URL.revokeObjectURL(AppState.recording.tempAudioUrl);
+          AppState.recording.tempAudioUrl = null;
+        }
+        AppState.user.status = 'idle';
+        broadcastStatus();
+      }
+    });
+
+    DOM.btnApproveAndShare.addEventListener('click', async () => {
+      const seg = AppState.segments.find(s => s.id === AppState.activeSegmentId);
+      if (!seg || !AppState.recording.tempAudioBlob) return;
+
+      // Önizleme sesini MUTLAKA durdur — arkada takılı kalmasın
+      try {
+        DOM.reviewAudioPlayer.pause();
+        DOM.reviewAudioPlayer.currentTime = 0;
+      } catch (e) {}
+
+      // Kendi listemize kaydet
+      seg.audioBlob = AppState.recording.tempAudioBlob;
+      seg.audioUrl = AppState.recording.tempAudioUrl;
+      seg.recordedBy = AppState.user.name;
+      seg.status = 'approved';
+
+      // Base64'e çevirip WebRTC ile odaya gönder
+      const base64Audio = await blobToBase64(seg.audioBlob);
+      broadcastData({
+        type: 'SEGMENT_AUDIO_SHARED',
+        segmentId: seg.id,
+        recordedBy: AppState.user.name,
+        mimeType: seg.audioBlob.type,
+        audioBase64: base64Audio
+      });
+
+      DOM.personalReviewSection.classList.add('hidden');
+      DOM.reviewAudioPlayer.src = '';
+      AppState.user.status = 'idle';
+      broadcastStatus();
+
+      // tempAudioBlob/Url referanslarını sıfırla (artık seg.audioBlob/audioUrl'de saklanıyor)
+      AppState.recording.tempAudioBlob = null;
+      AppState.recording.tempAudioUrl = null;
+
+      renderSegmentsList();
+      showToast('🎉 Kaydınız onaylandı ve odayla paylaşıldı!');
+    });
+
+    // ================= MASTER SES BİRLEŞTİRME & EXPORT (WEB AUDIO API) =================
+    DOM.btnMergeAllAudio.addEventListener('click', async () => {
+      const approvedSegments = AppState.segments.filter(s => s.audioBlob);
+
+      if (approvedSegments.length === 0) {
+        alert('Henüz onaylanmış hiçbir ses kaydı yok! Önce en az bir parçayı seslendirip onaylayın.');
+        return;
+      }
+
+      const originalBtnHtml = DOM.btnMergeAllAudio.innerHTML;
+      DOM.btnMergeAllAudio.disabled = true;
+      DOM.btnMergeAllAudio.innerHTML = `<span>⏳ Sesler Orijinal Saniyelere Birleştiriliyor...</span>`;
+
+      try {
+        const totalDuration = Math.max(
+          AppState.video.duration || 60,
+          ...approvedSegments.map(s => s.end + 2)
+        );
+
+        // Sabit sample rate: 44.1kHz, stereo. decodeAudioData çıktısı otomatik olarak
+        // OfflineAudioContext'in sample rate'ine yeniden örneklenir, bu yüzden farklı
+        // kaynak sample rate'leri sorun yaratmaz.
+        const sampleRate = 44100;
+        const offlineCtx = new OfflineAudioContext(2, Math.ceil(sampleRate * totalDuration), sampleRate);
+
+        // Her bir ses segmentini decode et ve başlangıç saniyesine yerleştir.
+        // decodeAudioData Promise döndürür ama context'i paylaştığımız (ve elle
+        // kapatmadığımız) için ardışık decode etmek güvenlidir.
+        let decodeErrors = [];
+        for (const seg of approvedSegments) {
+          try {
+            const arrayBuffer = await seg.audioBlob.arrayBuffer();
+            // decodeAudioData bazı tarayıcılarda ArrayBuffer'ı "tüketir" (detach eder),
+            // bu yüzden her segment için taze bir arrayBuffer alıyoruz (yukarıdaki satır zaten böyle).
+            const decodedBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
+
+            const source = offlineCtx.createBufferSource();
+            source.buffer = decodedBuffer;
+            source.connect(offlineCtx.destination);
+
+            // Negatif zaman start() metodunda hataya sebep olur; güvence altına al
+            const startAt = Math.max(0, seg.start);
+            source.start(startAt);
+          } catch (segErr) {
+            console.error(`"${seg.title}" sesi decode edilemedi:`, segErr);
+            decodeErrors.push(seg.title);
+          }
+        }
+
+        if (decodeErrors.length === approvedSegments.length) {
+          throw new Error('Hiçbir ses kaydı okunamadı. Tarayıcınız bu ses formatını desteklemiyor olabilir.');
+        }
+
+        // Render et
+        const renderedBuffer = await offlineCtx.startRendering();
+
+        // WAV dosyasına dönüştür ve indir
+        const wavBlob = audioBufferToWav(renderedBuffer);
+        downloadBlob(wavBlob, `DubSync_Master_${Date.now()}.wav`);
+
+        if (decodeErrors.length > 0) {
+          showToast(`⚠️ Birleştirildi ancak şu parçalar okunamadı: ${decodeErrors.join(', ')}`);
+        } else {
+          showToast('✅ Tüm dublaj parçaları tek parça WAV olarak birleştirildi ve indirildi!');
+        }
+      } catch (err) {
+        console.error('Birleştirme hatası:', err);
+        alert('Ses birleştirme sırasında bir hata oluştu: ' + err.message);
+      } finally {
+        DOM.btnMergeAllAudio.disabled = false;
+        DOM.btnMergeAllAudio.innerHTML = originalBtnHtml;
+      }
+    });
+
+    // WAV Format encoder
+    function audioBufferToWav(buffer) {
+      const numOfChan = buffer.numberOfChannels;
+      const length = buffer.length * numOfChan * 2 + 44;
+      const out = new DataView(new ArrayBuffer(length));
+      const channels = [];
+      let sample = 0;
+      let offset = 0;
+      let pos = 0;
+
+      // RIFF chunk descriptor
+      writeString(out, pos, 'RIFF'); pos += 4;
+      out.setUint32(pos, length - 8, true); pos += 4;
+      writeString(out, pos, 'WAVE'); pos += 4;
+      // FMT sub-chunk
+      writeString(out, pos, 'fmt '); pos += 4;
+      out.setUint32(pos, 16, true); pos += 4; // Subchunk1Size (16 for PCM)
+      out.setUint16(pos, 1, true); pos += 2;  // AudioFormat (1 for PCM)
+      out.setUint16(pos, numOfChan, true); pos += 2;
+      out.setUint32(pos, buffer.sampleRate, true); pos += 4;
+      out.setUint32(pos, buffer.sampleRate * 2 * numOfChan, true); pos += 4; // ByteRate
+      out.setUint16(pos, numOfChan * 2, true); pos += 2; // BlockAlign
+      out.setUint16(pos, 16, true); pos += 2; // BitsPerSample
+      // data sub-chunk
+      writeString(out, pos, 'data'); pos += 4;
+      out.setUint32(pos, length - pos - 4, true); pos += 4;
+
+      for (let i = 0; i < buffer.numberOfChannels; i++) {
+        channels.push(buffer.getChannelData(i));
+      }
+
+      while (offset < buffer.length) {
+        for (let i = 0; i < numOfChan; i++) {
+          sample = Math.max(-1, Math.min(1, channels[i][offset]));
+          sample = (sample < 0 ? sample * 32768 : sample * 32767) | 0;
+          out.setInt16(pos, sample, true);
+          pos += 2;
+        }
+        offset++;
+      }
+
+      return new Blob([out], { type: 'audio/wav' });
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 2000);
+    }
+
+    // ================= UTILITY FUNCTIONS =================
+    function formatTime(seconds) {
+      if (isNaN(seconds) || seconds < 0) return "00:00.0";
+      const mins = Math.floor(seconds / 60);
+      const secs = (seconds % 60).toFixed(1);
+      const mStr = mins < 10 ? '0' + mins : mins;
+      const sStr = parseFloat(secs) < 10 ? '0' + secs : secs;
+      return `${mStr}:${sStr}`;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[m]);
+    }
+
+    function sanitizeFilename(name) {
+      return String(name || 'segment').replace(/[^a-z0-9_\-ğüşıöçĞÜŞİÖÇ]+/gi, '_').substring(0, 60);
+    }
+
+    function playAudioUrl(url) {
+      const aud = new Audio(url);
+      aud.play();
+    }
+
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64data = reader.result.split(',')[1];
+          resolve(base64data);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function base64ToBlob(base64, mimeType) {
+      const byteCharacters = atob(base64);
+      const byteArrays = [];
+      for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+        const slice = byteCharacters.slice(offset, offset + 512);
+        const byteNumbers = new Array(slice.length);
+        for (let i = 0; i < slice.length; i++) {
+          byteNumbers[i] = slice.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        byteArrays.push(byteArray);
+      }
+      return new Blob(byteArrays, { type: mimeType });
+    }
+
+    // Toast Notification Banner
+    function showToast(msg) {
+      const toast = document.createElement('div');
+      toast.className = 'fixed bottom-5 right-5 z-50 bg-violet-600 text-white px-4 py-2.5 rounded-xl shadow-2xl text-xs font-semibold flex items-center gap-2 border border-violet-400/30 transition-all duration-300 transform translate-y-4 opacity-0';
+      toast.textContent = msg;
+      document.body.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-4', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-4');
+        setTimeout(() => toast.remove(), 400);
+      }, 4000);
+    }
+  </script>
+</body>
+</html>
